@@ -1,7 +1,7 @@
 # Gunicorn configuration for B-Transfer
 bind = "0.0.0.0:$PORT"
 workers = 4
-worker_class = "gevent"
+worker_class = "eventlet"
 timeout = 300
 keepalive = 5
 max_requests = 1000

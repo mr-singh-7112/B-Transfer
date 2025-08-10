@@ -6,27 +6,10 @@ google-auth-oauthlib==1.2.0
 google-auth-httplib2==0.2.0
 google-api-python-client==2.120.0
 gunicorn==21.2.0
-gevent==24.2.1
+eventlet==0.35.2
 aiofiles==23.2.1
 python-multipart==0.0.9
 flask-cors==4.0.0
 redis==5.0.1
 celery==5.3.4
-psutil==5.9.6
-
-# Additional dependencies for enhanced functionality
-# Note: These are built-in Python modules, but listed for documentation
-# - gzip (built-in)
-# - sqlite3 (built-in)
-# - threading (built-in)
-# - hashlib (built-in)
-# - base64 (built-in)
-# - secrets (built-in)
-# - uuid (built-in)
-# - datetime (built-in)
-# - os (built-in)
-# - json (built-in)
-# - socket (built-in)
-# - time (built-in)
-# - shutil (built-in)
-# - tempfile (built-in) 
+psutil==5.9.6 
