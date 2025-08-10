@@ -42,7 +42,7 @@ if not os.path.exists(UPLOAD_FOLDER):
     os.makedirs(UPLOAD_FOLDER)
 
 # Security settings
-MAX_UPLOADS_PER_SESSION = 50
+MAX_UPLOADS_PER_SESSION = 100  # Increased from 50
 MAX_FILE_SIZE_PER_UPLOAD = 5 * 1024 * 1024 * 1024  # 5GB
 CLOUD_STORAGE_THRESHOLD = 100 * 1024 * 1024  # 100MB - use cloud for files > 100MB
 ALLOWED_EXTENSIONS = {
@@ -196,9 +196,9 @@ def security_check():
     # Rate limiting
     if request.endpoint == 'upload_file':
         current_time = time.time()
-        if session.get('last_upload') and current_time - session['last_upload'] < 1:
+        if session.get('last_upload') and current_time - session['last_upload'] < 0.5:
             log_security_event('RATE_LIMIT', f'Too many uploads from {get_client_ip()}')
-            return jsonify({'error': 'Rate limit exceeded. Please wait before uploading again.'}), 429
+            return jsonify({'error': 'Rate limit exceeded. Please wait 0.5 seconds before uploading again.'}), 429
         
         if session.get('upload_count', 0) >= MAX_UPLOADS_PER_SESSION:
             log_security_event('UPLOAD_LIMIT', f'Upload limit exceeded from {get_client_ip()}')
@@ -777,6 +777,23 @@ def index():
                 text-align: center;
             }
             
+            .retry-btn {
+                background: var(--warning);
+                color: white;
+                border: none;
+                padding: 6px 12px;
+                border-radius: 4px;
+                font-size: 0.75rem;
+                cursor: pointer;
+                transition: all 0.3s ease;
+                display: none;
+            }
+            
+            .retry-btn:hover {
+                background: #d97706;
+                transform: translateY(-1px);
+            }
+            
             .empty-state {
                 text-align: center;
                 padding: 48px 24px;
@@ -1038,6 +1055,9 @@ def index():
                             </div>
                             <span class="progress-text">0%</span>
                         </div>
+                        <button class="retry-btn" style="display: none;" onclick="retryUpload('${file.name.replace(/'/g, "\\'")}')">
+                            <i class="fas fa-redo"></i> Retry
+                        </button>
                     </div>
                 `;
                 queueItems.appendChild(queueItem);
@@ -1084,6 +1104,48 @@ def index():
                 }, 300);
             }
             
+            function retryUpload(filename) {
+                // Find the file in the queue and retry
+                const queueItem = document.getElementById(`queue-${filename.replace(/[^a-zA-Z0-9]/g, '_')}`);
+                if (queueItem) {
+                    // Reset status
+                    const statusText = queueItem.querySelector('.status-text');
+                    const progressContainer = queueItem.querySelector('.queue-progress');
+                    const retryBtn = queueItem.querySelector('.retry-btn');
+                    
+                    statusText.textContent = 'Retrying...';
+                    statusText.className = 'status-text uploading';
+                    if (progressContainer) progressContainer.style.display = 'none';
+                    if (retryBtn) retryBtn.style.display = 'none';
+                    
+                    // Create a new file object for retry (since the original might be consumed)
+                    const originalFile = queueItem.querySelector('.queue-file-info');
+                    if (originalFile) {
+                        // Create a new file object with the same name and size
+                        const fileSize = queueItem.querySelector('.queue-size').textContent;
+                        const file = new File([], filename, { type: 'application/octet-stream' });
+                        file.size = parseFileSize(fileSize);
+                        
+                        // Add to front of queue for immediate processing
+                        uploadQueue.unshift(file);
+                        if (!isUploading) {
+                            processUploadQueue();
+                        }
+                    }
+                }
+            }
+            
+            function parseFileSize(sizeStr) {
+                const units = { 'B': 1, 'KB': 1024, 'MB': 1024*1024, 'GB': 1024*1024*1024 };
+                const match = sizeStr.match(/^([\d.]+)\s*([KMGT]?B)$/);
+                if (match) {
+                    const value = parseFloat(match[1]);
+                    const unit = match[2] || 'B';
+                    return Math.round(value * units[unit]);
+                }
+                return 0;
+            }
+            
             async function uploadFile(file, queueItem) {
                 const formData = new FormData();
                 formData.append('file', file);
@@ -1117,7 +1179,7 @@ def index():
                                 if (queueItem.parentNode) {
                                     queueItem.remove();
                                 }
-                            }, 3000);
+                            }, 5000);
                             
                             resolve();
                         } else {
@@ -1126,8 +1188,24 @@ def index():
                             statusText.textContent = 'Failed';
                             statusText.className = 'status-text failed';
                             
-                            statusDiv.innerHTML = `<div class="status error">❌ Error uploading ${file.name}</div>`;
-                            reject(new Error('Upload failed'));
+                            // Show retry button
+                            const retryBtn = queueItem.querySelector('.retry-btn');
+                            if (retryBtn) retryBtn.style.display = 'inline-block';
+                            
+                            // Try to parse error message from response
+                            let errorMessage = 'Upload failed';
+                            try {
+                                const response = JSON.parse(xhr.responseText);
+                                if (response.error) {
+                                    errorMessage = response.error;
+                                }
+                            } catch (e) {
+                                // If can't parse JSON, use status text
+                                errorMessage = xhr.statusText || 'Upload failed';
+                            }
+                            
+                            statusDiv.innerHTML = `<div class="status error">❌ Error uploading ${file.name}: ${errorMessage}</div>`;
+                            reject(new Error(errorMessage));
                         }
                         
                         setTimeout(() => {
@@ -1140,8 +1218,12 @@ def index():
                         statusText.textContent = 'Failed';
                         statusText.className = 'status-text failed';
                         
-                        statusDiv.innerHTML = `<div class="status error">❌ Upload failed: ${file.name}</div>`;
-                        reject(new Error('Upload failed'));
+                        // Show retry button
+                        const retryBtn = queueItem.querySelector('.retry-btn');
+                        if (retryBtn) retryBtn.style.display = 'inline-block';
+                        
+                        statusDiv.innerHTML = `<div class="status error">❌ Network error uploading ${file.name}. Please check your connection.</div>`;
+                        reject(new Error('Network error'));
                         
                         setTimeout(() => {
                             statusDiv.innerHTML = '';
@@ -1149,6 +1231,25 @@ def index():
                     });
                     
                     xhr.open('POST', `${API_BASE}/upload`);
+                    xhr.timeout = 300000; // 5 minutes timeout
+                    
+                    xhr.addEventListener('timeout', () => {
+                        const statusText = queueItem.querySelector('.status-text');
+                        statusText.textContent = 'Failed';
+                        statusText.className = 'status-text failed';
+                        
+                        // Show retry button
+                        const retryBtn = queueItem.querySelector('.retry-btn');
+                        if (retryBtn) retryBtn.style.display = 'inline-block';
+                        
+                        statusDiv.innerHTML = `<div class="status error">❌ Upload timeout for ${file.name}. File may be too large.</div>`;
+                        reject(new Error('Upload timeout'));
+                        
+                        setTimeout(() => {
+                            statusDiv.innerHTML = '';
+                        }, 5000);
+                    });
+                    
                     xhr.send(formData);
                 });
             }
@@ -1465,8 +1566,11 @@ def upload_file():
         cloud_file_id = None
         
         # Check if file should be stored in cloud
-        if file.content_length and file.content_length > CLOUD_STORAGE_THRESHOLD:
-            # Use cloud storage for large files
+        # Try to get file size from content_length or calculate it
+        file_size_bytes = getattr(file, 'content_length', None)
+        
+        if file_size_bytes and file_size_bytes > CLOUD_STORAGE_THRESHOLD:
+            # Use cloud storage for large files (when we know size upfront)
             cloud_storage = get_cloud_storage()
             if cloud_storage:
                 # Save to temp file first
@@ -1494,7 +1598,7 @@ def upload_file():
                 file_size = os.path.getsize(filepath)
                 storage_type = 'local'
         else:
-            # Use local storage for small files
+            # Use local storage for small files or when size is unknown
             filepath = os.path.join(UPLOAD_FOLDER, filename)
             file.save(filepath)
             file_size = os.path.getsize(filepath)
@@ -1531,8 +1635,17 @@ def upload_file():
         }), 200
         
     except Exception as e:
-        log_security_event('UPLOAD_ERROR', f'Exception: {str(e)}')
-        print(f"❌ Upload error: {str(e)}")
+        error_msg = f'Exception: {str(e)}'
+        log_security_event('UPLOAD_ERROR', error_msg)
+        print(f"❌ Upload error: {error_msg}")
+        
+        # Clean up any partial files
+        try:
+            if 'filepath' in locals() and os.path.exists(filepath):
+                os.remove(filepath)
+        except:
+            pass
+            
         return jsonify({'error': f'Upload failed: {str(e)}'}), 500
 
 @app.route('/lock/<filename>', methods=['POST'])
