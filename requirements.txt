@@ -6,6 +6,12 @@ google-auth-oauthlib==1.1.0
 google-auth-httplib2==0.1.1
 google-api-python-client==2.108.0
 gunicorn==21.2.0
+aiofiles==23.2.1
+python-multipart==0.0.6
+flask-cors==4.0.0
+redis==5.0.1
+celery==5.3.4
+psutil==5.9.6
 
 # Additional dependencies for enhanced functionality
 # Note: These are built-in Python modules, but listed for documentation

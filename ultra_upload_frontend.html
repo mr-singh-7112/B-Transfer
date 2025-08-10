@@ -1,0 +1,330 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>B-Transfer Ultra High-Speed Upload</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Segoe UI', sans-serif; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); min-height: 100vh; padding: 20px; }
+        .container { max-width: 1200px; margin: 0 auto; background: rgba(255, 255, 255, 0.95); border-radius: 20px; box-shadow: 0 20px 40px rgba(0, 0, 0, 0.1); overflow: hidden; }
+        .header { background: linear-gradient(135deg, #2c3e50 0%, #34495e 100%); color: white; padding: 30px; text-align: center; }
+        .header h1 { font-size: 2.5em; margin-bottom: 10px; background: linear-gradient(45deg, #3498db, #e74c3c); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+        .upload-area { padding: 40px; text-align: center; }
+        .drop-zone { border: 3px dashed #3498db; border-radius: 15px; padding: 60px 20px; background: #f8f9fa; transition: all 0.3s ease; cursor: pointer; margin-bottom: 30px; }
+        .drop-zone:hover, .drop-zone.dragover { border-color: #e74c3c; background: #fff5f5; transform: translateY(-2px); }
+        .drop-zone i { font-size: 4em; color: #3498db; margin-bottom: 20px; }
+        .upload-btn { background: linear-gradient(135deg, #3498db, #2980b9); color: white; border: none; padding: 15px 40px; border-radius: 25px; font-size: 1.2em; cursor: pointer; margin-top: 20px; }
+        .progress-section { padding: 0 40px 40px; display: none; }
+        .progress-section.active { display: block; }
+        .upload-item { background: white; border-radius: 15px; padding: 25px; margin-bottom: 20px; box-shadow: 0 5px 15px rgba(0, 0, 0, 0.1); border-left: 5px solid #3498db; }
+        .progress-bar { width: 100%; height: 12px; background: #ecf0f1; border-radius: 6px; overflow: hidden; margin-bottom: 15px; }
+        .progress-fill { height: 100%; background: linear-gradient(90deg, #3498db, #2ecc71); transition: width 0.3s ease; }
+        .upload-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 15px; margin-top: 20px; }
+        .stat-item { text-align: center; padding: 15px; background: #f8f9fa; border-radius: 10px; }
+        .chunk-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(60px, 1fr)); gap: 5px; margin-top: 10px; }
+        .chunk-item { width: 100%; height: 30px; border-radius: 5px; display: flex; align-items: center; justify-content: center; font-size: 0.8em; font-weight: bold; color: white; }
+        .chunk-uploaded { background: #27ae60; }
+        .chunk-uploading { background: #3498db; }
+        .chunk-pending { background: #bdc3c7; }
+        .chunk-error { background: #e74c3c; }
+        .file-input { display: none; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🚀 B-Transfer Ultra</h1>
+            <p>Ultra High-Speed File Transfer with Chunked Uploads</p>
+        </div>
+
+        <div class="upload-area">
+            <div class="drop-zone" id="dropZone">
+                <i>📁</i>
+                <h3>Drop files here or click to browse</h3>
+                <p>Supports files up to 5GB with ultra-fast chunked uploads</p>
+                <input type="file" class="file-input" id="fileInput" multiple>
+                <button class="upload-btn" onclick="document.getElementById('fileInput').click()">Choose Files</button>
+            </div>
+        </div>
+
+        <div class="progress-section" id="progressSection">
+            <h3>📊 Upload Progress</h3>
+            <div id="uploadList"></div>
+        </div>
+    </div>
+
+    <script>
+        class UltraUploader {
+            constructor() {
+                this.uploadSessions = new Map();
+                this.chunkSize = 1024 * 1024; // 1MB chunks
+                this.maxConcurrentChunks = 5;
+                this.setupEventListeners();
+            }
+
+            setupEventListeners() {
+                const dropZone = document.getElementById('dropZone');
+                const fileInput = document.getElementById('fileInput');
+
+                dropZone.addEventListener('dragover', (e) => { e.preventDefault(); dropZone.classList.add('dragover'); });
+                dropZone.addEventListener('dragleave', (e) => { e.preventDefault(); dropZone.classList.remove('dragover'); });
+                dropZone.addEventListener('drop', (e) => { e.preventDefault(); dropZone.classList.remove('dragover'); const files = Array.from(e.dataTransfer.files); this.handleFiles(files); });
+                fileInput.addEventListener('change', (e) => { const files = Array.from(e.target.files); this.handleFiles(files); });
+                dropZone.addEventListener('click', () => { fileInput.click(); });
+            }
+
+            async handleFiles(files) {
+                for (const file of files) {
+                    if (file.size > 5 * 1024 * 1024 * 1024) {
+                        alert(`File ${file.name} is too large. Maximum size is 5GB.`);
+                        continue;
+                    }
+                    await this.uploadFile(file);
+                }
+            }
+
+            async uploadFile(file) {
+                const sessionId = this.generateSessionId();
+                const totalChunks = Math.ceil(file.size / this.chunkSize);
+                
+                const uploadSession = {
+                    id: sessionId,
+                    file: file,
+                    totalChunks: totalChunks,
+                    uploadedChunks: new Set(),
+                    status: 'uploading',
+                    startTime: Date.now()
+                };
+
+                this.uploadSessions.set(sessionId, uploadSession);
+                this.createUploadItem(uploadSession);
+                this.showProgressSection();
+
+                try {
+                    const sessionResponse = await fetch('/api/upload/session', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ filename: file.name, total_size: file.size })
+                    });
+
+                    if (!sessionResponse.ok) throw new Error('Failed to create upload session');
+                    const sessionData = await sessionResponse.json();
+                    uploadSession.serverSessionId = sessionData.session_id;
+                    await this.uploadChunks(uploadSession);
+
+                } catch (error) {
+                    console.error('Upload failed:', error);
+                    this.updateUploadStatus(uploadSession, 'error', error.message);
+                }
+            }
+
+            async uploadChunks(uploadSession) {
+                const chunks = this.createChunks(uploadSession.file);
+                const chunkPromises = [];
+
+                for (let i = 0; i < chunks.length; i++) {
+                    const chunk = chunks[i];
+                    const chunkId = i;
+
+                    while (this.activeUploads >= this.maxConcurrentChunks) {
+                        await this.sleep(100);
+                    }
+
+                    this.activeUploads++;
+                    
+                    const chunkPromise = this.uploadChunk(uploadSession, chunkId, chunk)
+                        .then(() => { this.activeUploads--; })
+                        .catch((error) => { this.activeUploads--; console.error(`Chunk ${chunkId} failed:`, error); });
+
+                    chunkPromises.push(chunkPromise);
+                }
+
+                await Promise.allSettled(chunkPromises);
+
+                if (uploadSession.uploadedChunks.size === uploadSession.totalChunks) {
+                    await this.assembleFile(uploadSession);
+                }
+            }
+
+            createChunks(file) {
+                const chunks = [];
+                let offset = 0;
+                while (offset < file.size) {
+                    const chunk = file.slice(offset, offset + this.chunkSize);
+                    chunks.push(chunk);
+                    offset += this.chunkSize;
+                }
+                return chunks;
+            }
+
+            async uploadChunk(uploadSession, chunkId, chunk) {
+                const formData = new FormData();
+                formData.append('chunk', chunk);
+                formData.append('chunk_id', chunkId);
+                formData.append('session_id', uploadSession.serverSessionId);
+
+                const response = await fetch('/api/upload/chunk', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                if (!response.ok) throw new Error(`Chunk upload failed: ${response.statusText}`);
+                const result = await response.json();
+                
+                if (result.status === 'success') {
+                    uploadSession.uploadedChunks.add(chunkId);
+                    this.updateChunkProgress(uploadSession, chunkId, 'uploaded');
+                    this.updateUploadProgress(uploadSession);
+                } else {
+                    throw new Error(result.error || 'Chunk upload failed');
+                }
+            }
+
+            async assembleFile(uploadSession) {
+                try {
+                    this.updateUploadStatus(uploadSession, 'assembling', 'Assembling file...');
+                    const response = await fetch('/api/upload/assemble', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ session_id: uploadSession.serverSessionId })
+                    });
+
+                    if (!response.ok) throw new Error('File assembly failed');
+                    const result = await response.json();
+                    
+                    if (result.status === 'success') {
+                        this.updateUploadStatus(uploadSession, 'completed', 'Upload completed!');
+                        this.updateUploadProgress(uploadSession, 100);
+                    } else {
+                        throw new Error(result.error || 'Assembly failed');
+                    }
+
+                } catch (error) {
+                    console.error('Assembly failed:', error);
+                    this.updateUploadStatus(uploadSession, 'error', error.message);
+                }
+            }
+
+            createUploadItem(uploadSession) {
+                const uploadList = document.getElementById('uploadList');
+                const uploadItem = document.createElement('div');
+                uploadItem.className = 'upload-item';
+                uploadItem.id = `upload-${uploadSession.id}`;
+
+                uploadItem.innerHTML = `
+                    <div class="upload-header">
+                        <div class="file-info">
+                            <h4>${uploadSession.file.name}</h4>
+                            <p>${this.formatFileSize(uploadSession.file.size)} • ${uploadSession.totalChunks} chunks</p>
+                        </div>
+                        <span class="upload-status status-uploading" id="status-${uploadSession.id}">Uploading</span>
+                    </div>
+                    
+                    <div class="progress-bar">
+                        <div class="progress-fill" id="progress-${uploadSession.id}" style="width: 0%"></div>
+                    </div>
+                    
+                    <div class="upload-stats">
+                        <div class="stat-item">
+                            <div class="stat-value" id="speed-${uploadSession.id}">0 MB/s</div>
+                            <div class="stat-label">Speed</div>
+                        </div>
+                        <div class="stat-item">
+                            <div class="stat-value" id="eta-${uploadSession.id}">--</div>
+                            <div class="stat-label">ETA</div>
+                        </div>
+                        <div class="stat-item">
+                            <div class="stat-value" id="chunks-${uploadSession.id}">0/${uploadSession.totalChunks}</div>
+                            <div class="stat-label">Chunks</div>
+                        </div>
+                    </div>
+                    
+                    <div class="chunk-info">
+                        <strong>Chunk Progress:</strong>
+                        <div class="chunk-grid" id="chunk-grid-${uploadSession.id}">
+                            ${this.createChunkGrid(uploadSession.totalChunks)}
+                        </div>
+                    </div>
+                `;
+
+                uploadList.appendChild(uploadItem);
+            }
+
+            createChunkGrid(totalChunks) {
+                let grid = '';
+                for (let i = 0; i < totalChunks; i++) {
+                    grid += `<div class="chunk-item chunk-pending" id="chunk-${i}">${i + 1}</div>`;
+                }
+                return grid;
+            }
+
+            updateChunkProgress(uploadSession, chunkId, status) {
+                const chunkElement = document.getElementById(`chunk-${chunkId}`);
+                if (chunkElement) {
+                    chunkElement.className = `chunk-item chunk-${status}`;
+                }
+            }
+
+            updateUploadProgress(uploadSession) {
+                const progress = (uploadSession.uploadedChunks.size / uploadSession.totalChunks) * 100;
+                const progressBar = document.getElementById(`progress-${uploadSession.id}`);
+                const chunksText = document.getElementById(`chunks-${uploadSession.id}`);
+                
+                if (progressBar) progressBar.style.width = `${progress}%`;
+                if (chunksText) chunksText.textContent = `${uploadSession.uploadedChunks.size}/${uploadSession.totalChunks}`;
+
+                const elapsed = (Date.now() - uploadSession.startTime) / 1000;
+                const uploadedBytes = uploadSession.uploadedChunks.size * this.chunkSize;
+                const speed = uploadedBytes / elapsed;
+                const remainingBytes = uploadSession.file.size - uploadedBytes;
+                const eta = remainingBytes / speed;
+
+                const speedElement = document.getElementById(`speed-${uploadSession.id}`);
+                const etaElement = document.getElementById(`eta-${uploadSession.id}`);
+
+                if (speedElement) speedElement.textContent = `${this.formatFileSize(speed)}/s`;
+                if (etaElement) etaElement.textContent = this.formatTime(eta);
+            }
+
+            updateUploadStatus(uploadSession, status, message) {
+                const statusElement = document.getElementById(`status-${uploadSession.id}`);
+                if (statusElement) {
+                    statusElement.className = `upload-status status-${status}`;
+                    statusElement.textContent = message;
+                }
+            }
+
+            showProgressSection() {
+                const progressSection = document.getElementById('progressSection');
+                progressSection.classList.add('active');
+            }
+
+            generateSessionId() {
+                return Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
+            }
+
+            formatFileSize(bytes) {
+                if (bytes === 0) return '0 B';
+                const k = 1024;
+                const sizes = ['B', 'KB', 'MB', 'GB'];
+                const i = Math.floor(Math.log(bytes) / Math.log(k));
+                return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+            }
+
+            formatTime(seconds) {
+                if (seconds === Infinity || seconds === NaN) return '--';
+                if (seconds < 60) return Math.round(seconds) + 's';
+                if (seconds < 3600) return Math.round(seconds / 60) + 'm';
+                return Math.round(seconds / 3600) + 'h';
+            }
+
+            sleep(ms) {
+                return new Promise(resolve => setTimeout(resolve, ms));
+            }
+        }
+
+        const uploader = new UltraUploader();
+    </script>
+</body>
+</html> 

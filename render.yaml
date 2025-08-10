@@ -2,9 +2,9 @@ services:
   - type: web
     name: b-transfer
     env: python
-    plan: free
+    plan: starter
     buildCommand: pip install -r requirements.txt
-    startCommand: gunicorn --bind 0.0.0.0:$PORT b_transfer_server:app
+    startCommand: gunicorn --bind 0.0.0.0:$PORT --workers 4 --worker-class gevent --timeout 300 --keep-alive 5 b_transfer_server:app
     envVars:
       - key: PYTHON_VERSION
         value: 3.10.0
@@ -12,4 +12,24 @@ services:
         value: 10000
       - key: RENDER
         value: "true"
-    healthCheckPath: /health 
+      - key: REDIS_URL
+        value: redis://redis-b-transfer:6379
+      - key: UPLOAD_CHUNK_SIZE
+        value: "1048576"
+      - key: MAX_CONCURRENT_UPLOADS
+        value: "10"
+      - key: ENABLE_COMPRESSION
+        value: "true"
+      - key: ENABLE_PARALLEL_PROCESSING
+        value: "true"
+    healthCheckPath: /health
+    autoscaling:
+      minInstances: 1
+      maxInstances: 5
+      targetCPUUtilizationPercent: 70
+      targetMemoryUtilizationPercent: 80
+
+  - type: redis
+    name: redis-b-transfer
+    plan: starter
+    maxmemoryPolicy: allkeys-lru 

@@ -22,6 +22,15 @@ from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 from cryptography.hazmat.backends import default_backend
 from cloud_storage import get_cloud_storage
 
+# Import ultra upload manager
+try:
+    from ultra_upload import upload_manager
+    ULTRA_UPLOAD_AVAILABLE = True
+    print("✅ Ultra upload system loaded successfully")
+except ImportError as e:
+    ULTRA_UPLOAD_AVAILABLE = False
+    print(f"⚠️ Ultra upload system not available: {e}")
+
 app = Flask(__name__)
 app.secret_key = secrets.token_hex(32)  # Secure session key
 app.config['MAX_CONTENT_LENGTH'] = 10 * 1024 * 1024 * 1024  # 10GB limit
@@ -649,33 +658,123 @@ def index():
                 border: 1px solid #bfdbfe;
             }
             
-            .progress-container {
+            .upload-queue {
                 margin: 16px 0;
-                display: none;
+                border: 1px solid var(--border);
+                border-radius: 12px;
+                padding: 16px;
+                background: var(--light);
             }
             
-            .progress-bar {
-                width: 100%;
-                height: 8px;
-                background: var(--border);
-                border-radius: 4px;
-                overflow: hidden;
+            .upload-queue h4 {
+                margin: 0 0 16px 0;
+                color: var(--dark);
+                font-size: 1rem;
+                display: flex;
+                align-items: center;
+                gap: 8px;
+            }
+            
+            .queue-items {
+                max-height: 200px;
+                overflow-y: auto;
+            }
+            
+            .queue-item {
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                padding: 12px;
+                border: 1px solid var(--border);
+                border-radius: 8px;
                 margin-bottom: 8px;
+                background: white;
+                transition: all 0.3s ease;
             }
             
-            .progress-fill {
+            .queue-file-info {
+                display: flex;
+                align-items: center;
+                gap: 12px;
+                flex: 1;
+            }
+            
+            .queue-filename {
+                font-weight: 500;
+                color: var(--dark);
+                max-width: 200px;
+                overflow: hidden;
+                text-overflow: ellipsis;
+                white-space: nowrap;
+            }
+            
+            .queue-size {
+                color: var(--gray);
+                font-size: 0.875rem;
+            }
+            
+            .queue-status {
+                display: flex;
+                flex-direction: column;
+                align-items: flex-end;
+                gap: 8px;
+                min-width: 120px;
+            }
+            
+            .status-text {
+                font-size: 0.875rem;
+                font-weight: 500;
+                padding: 4px 8px;
+                border-radius: 4px;
+                text-align: center;
+                min-width: 80px;
+            }
+            
+            .status-text.queued {
+                background: #f3f4f6;
+                color: #6b7280;
+            }
+            
+            .status-text.uploading {
+                background: #dbeafe;
+                color: #1d4ed8;
+            }
+            
+            .status-text.completed {
+                background: #dcfce7;
+                color: #059669;
+            }
+            
+            .status-text.failed {
+                background: #fef2f2;
+                color: #dc2626;
+            }
+            
+            .queue-progress {
+                width: 100px;
+            }
+            
+            .queue-progress .progress-bar {
+                width: 100%;
+                height: 6px;
+                background: var(--border);
+                border-radius: 3px;
+                overflow: hidden;
+                margin-bottom: 4px;
+            }
+            
+            .queue-progress .progress-fill {
                 height: 100%;
                 background: linear-gradient(45deg, var(--primary), var(--secondary));
                 width: 0%;
                 transition: width 0.3s ease;
-                border-radius: 4px;
+                border-radius: 3px;
             }
             
-            .progress-text {
-                text-align: center;
-                font-size: 0.9rem;
+            .queue-progress .progress-text {
+                font-size: 0.75rem;
                 color: var(--gray);
-                font-weight: 500;
+                text-align: center;
             }
             
             .empty-state {
@@ -821,11 +920,9 @@ def index():
                         <i class="fas fa-folder-open"></i> Choose Files
                     </button>
                     <div id="uploadStatus"></div>
-                    <div class="progress-container" id="progressContainer">
-                        <div class="progress-bar">
-                            <div class="progress-fill" id="progressFill"></div>
-                        </div>
-                        <div class="progress-text" id="progressText">0%</div>
+                    <div class="upload-queue" id="uploadQueue">
+                        <h4><i class="fas fa-list"></i> Upload Queue</h4>
+                        <div class="queue-items" id="queueItems"></div>
                     </div>
                 </div>
                 
@@ -902,10 +999,78 @@ def index():
                 handleFiles(files);
             }
             
+            // Upload queue management
+            let uploadQueue = [];
+            let isUploading = false;
+            
             function handleFiles(files) {
                 Array.from(files).forEach(file => {
-                    uploadFile(file);
+                    addToUploadQueue(file);
                 });
+                
+                // Start processing queue if not already running
+                if (!isUploading) {
+                    processUploadQueue();
+                }
+            }
+            
+            function addToUploadQueue(file) {
+                uploadQueue.push(file);
+                displayQueueItem(file);
+            }
+            
+            function displayQueueItem(file) {
+                const queueItems = document.getElementById('queueItems');
+                const queueItem = document.createElement('div');
+                queueItem.className = 'queue-item';
+                queueItem.id = `queue-${file.name.replace(/[^a-zA-Z0-9]/g, '_')}`;
+                queueItem.innerHTML = `
+                    <div class="queue-file-info">
+                        <i class="fas ${getFileIcon(file.name)}"></i>
+                        <span class="queue-filename">${file.name}</span>
+                        <span class="queue-size">${formatFileSize(file.size)}</span>
+                    </div>
+                    <div class="queue-status">
+                        <span class="status-text queued">Queued</span>
+                        <div class="queue-progress" style="display: none;">
+                            <div class="progress-bar">
+                                <div class="progress-fill" style="width: 0%"></div>
+                            </div>
+                            <span class="progress-text">0%</span>
+                        </div>
+                    </div>
+                `;
+                queueItems.appendChild(queueItem);
+            }
+            
+            async function processUploadQueue() {
+                if (uploadQueue.length === 0) {
+                    isUploading = false;
+                    return;
+                }
+                
+                isUploading = true;
+                const file = uploadQueue.shift();
+                
+                // Update status to uploading
+                const queueItem = document.getElementById(`queue-${file.name.replace(/[^a-zA-Z0-9]/g, '_')}`);
+                if (queueItem) {
+                    const statusText = queueItem.querySelector('.status-text');
+                    const progressContainer = queueItem.querySelector('.queue-progress');
+                    
+                    statusText.textContent = 'Uploading...';
+                    statusText.className = 'status-text uploading';
+                    progressContainer.style.display = 'block';
+                    
+                    try {
+                        await uploadFile(file, queueItem);
+                    } catch (error) {
+                        console.error('Upload error:', error);
+                    }
+                }
+                
+                // Process next file in queue
+                setTimeout(() => processUploadQueue(), 100);
             }
             
             function handleSearch(e) {
@@ -919,41 +1084,83 @@ def index():
                 }, 300);
             }
             
-            async function uploadFile(file) {
+            async function uploadFile(file, queueItem) {
                 const formData = new FormData();
                 formData.append('file', file);
                 
                 const statusDiv = document.getElementById('uploadStatus');
-                const progressContainer = document.getElementById('progressContainer');
-                const progressFill = document.getElementById('progressFill');
-                const progressText = document.getElementById('progressText');
-                
                 statusDiv.innerHTML = `<div class="status info">📤 Uploading ${file.name}...</div>`;
-                progressContainer.style.display = 'block';
                 
-                try {
-                    const response = await fetch(`${API_BASE}/upload`, {
-                        method: 'POST',
-                        body: formData
+                return new Promise((resolve, reject) => {
+                    const xhr = new XMLHttpRequest();
+                    
+                    xhr.upload.addEventListener('progress', (event) => {
+                        if (event.lengthComputable) {
+                            const progress = Math.round((event.loaded / event.total) * 100);
+                            updateQueueProgress(file.name, progress, queueItem);
+                        }
                     });
                     
-                    const result = await response.json();
+                    xhr.addEventListener('load', () => {
+                        if (xhr.status === 200) {
+                            // Update status to completed
+                            const statusText = queueItem.querySelector('.status-text');
+                            statusText.textContent = 'Completed';
+                            statusText.className = 'status-text completed';
+                            
+                            statusDiv.innerHTML = `<div class="status success">✅ ${file.name} uploaded successfully!</div>`;
+                            refreshFiles();
+                            updateStats();
+                            
+                            // Remove from queue after delay
+                            setTimeout(() => {
+                                if (queueItem.parentNode) {
+                                    queueItem.remove();
+                                }
+                            }, 3000);
+                            
+                            resolve();
+                        } else {
+                            // Update status to failed
+                            const statusText = queueItem.querySelector('.status-text');
+                            statusText.textContent = 'Failed';
+                            statusText.className = 'status-text failed';
+                            
+                            statusDiv.innerHTML = `<div class="status error">❌ Error uploading ${file.name}</div>`;
+                            reject(new Error('Upload failed'));
+                        }
+                        
+                        setTimeout(() => {
+                            statusDiv.innerHTML = '';
+                        }, 5000);
+                    });
                     
-                    if (response.ok) {
-                        statusDiv.innerHTML = `<div class="status success">✅ ${file.name} uploaded successfully!</div>`;
-                        refreshFiles();
-                        updateStats();
-                    } else {
-                        statusDiv.innerHTML = `<div class="status error">❌ Error: ${result.error}</div>`;
-                    }
-                } catch (error) {
-                    statusDiv.innerHTML = `<div class="status error">❌ Upload failed: ${error.message}</div>`;
-                }
+                    xhr.addEventListener('error', () => {
+                        const statusText = queueItem.querySelector('.status-text');
+                        statusText.textContent = 'Failed';
+                        statusText.className = 'status-text failed';
+                        
+                        statusDiv.innerHTML = `<div class="status error">❌ Upload failed: ${file.name}</div>`;
+                        reject(new Error('Upload failed'));
+                        
+                        setTimeout(() => {
+                            statusDiv.innerHTML = '';
+                        }, 5000);
+                    });
+                    
+                    xhr.open('POST', `${API_BASE}/upload`);
+                    xhr.send(formData);
+                });
+            }
+            
+            function updateQueueProgress(filename, progress, queueItem) {
+                const progressFill = queueItem.querySelector('.progress-fill');
+                const progressText = queueItem.querySelector('.progress-text');
                 
-                progressContainer.style.display = 'none';
-                setTimeout(() => {
-                    statusDiv.innerHTML = '';
-                }, 5000);
+                if (progressFill && progressText) {
+                    progressFill.style.width = `${progress}%`;
+                    progressText.textContent = `${progress}%`;
+                }
             }
             
             async function refreshFiles() {
@@ -1023,6 +1230,27 @@ def index():
                         </div>
                     </div>
                 `).join('');
+            }
+            
+            function formatFileSize(bytes) {
+                if (bytes === 0) return '0 Bytes';
+                const k = 1024;
+                const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+                const i = Math.floor(Math.log(bytes) / Math.log(k));
+                return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+            }
+            
+            function formatDate(dateString) {
+                const date = new Date(dateString);
+                const now = new Date();
+                const diffTime = Math.abs(now - date);
+                const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+                
+                if (diffDays === 1) return 'Today';
+                if (diffDays === 2) return 'Yesterday';
+                if (diffDays <= 7) return `${diffDays - 1} days ago`;
+                
+                return date.toLocaleDateString();
             }
             
             function getFileIcon(filename) {
@@ -1575,6 +1803,199 @@ def delete_file(filename):
         log_security_event('DELETE_ERROR', f'Exception: {str(e)}')
         print(f"❌ Delete error: {str(e)}")
         return jsonify({'error': 'Delete failed'}), 500
+
+# Ultra High-Speed Upload API Endpoints
+@app.route('/api/upload/session', methods=['POST'])
+def create_upload_session():
+    """Create a new upload session for chunked uploads"""
+    if not ULTRA_UPLOAD_AVAILABLE:
+        return jsonify({'error': 'Ultra upload system not available'}), 503
+    
+    try:
+        data = request.get_json()
+        if not data or 'filename' not in data or 'total_size' not in data:
+            return jsonify({'error': 'Missing filename or total_size'}), 400
+        
+        filename = data['filename']
+        total_size = int(data['total_size'])
+        
+        # Validate file size
+        if total_size > MAX_FILE_SIZE_PER_UPLOAD:
+            return jsonify({'error': f'File size exceeds maximum limit of {get_file_size(MAX_FILE_SIZE_PER_UPLOAD)}'}), 400
+        
+        # Validate file type
+        if not allowed_file(filename):
+            return jsonify({'error': 'File type not allowed'}), 400
+        
+        # Create upload session
+        session_id = upload_manager.create_upload_session(filename, total_size)
+        
+        log_security_event('UPLOAD_SESSION_CREATED', f'{filename} ({get_file_size(total_size)})')
+        
+        return jsonify({
+            'status': 'success',
+            'session_id': session_id,
+            'filename': filename,
+            'total_size': total_size,
+            'chunk_size': upload_manager.chunk_size,
+            'total_chunks': (total_size + upload_manager.chunk_size - 1) // upload_manager.chunk_size
+        }), 200
+        
+    except Exception as e:
+        log_security_event('UPLOAD_SESSION_ERROR', f'Exception: {str(e)}')
+        return jsonify({'error': f'Session creation failed: {str(e)}'}), 500
+
+@app.route('/api/upload/chunk', methods=['POST'])
+def upload_chunk():
+    """Upload a single chunk of a file"""
+    if not ULTRA_UPLOAD_AVAILABLE:
+        return jsonify({'error': 'Ultra upload system not available'}), 503
+    
+    try:
+        if 'chunk' not in request.files:
+            return jsonify({'error': 'No chunk file provided'}), 400
+        
+        if 'session_id' not in request.form:
+            return jsonify({'error': 'No session ID provided'}), 400
+        
+        if 'chunk_id' not in request.form:
+            return jsonify({'error': 'No chunk ID provided'}), 400
+        
+        chunk_file = request.files['chunk']
+        session_id = request.form['session_id']
+        chunk_id = int(request.form['chunk_id'])
+        
+        # Read chunk data
+        chunk_data = chunk_file.read()
+        
+        # Upload chunk
+        result = upload_manager.upload_chunk(session_id, chunk_id, chunk_data)
+        
+        if 'error' in result:
+            log_security_event('CHUNK_UPLOAD_ERROR', f'Session: {session_id}, Chunk: {chunk_id}, Error: {result["error"]}')
+            return jsonify(result), 400
+        
+        log_security_event('CHUNK_UPLOAD_SUCCESS', f'Session: {session_id}, Chunk: {chunk_id}')
+        
+        return jsonify(result), 200
+        
+    except Exception as e:
+        log_security_event('CHUNK_UPLOAD_ERROR', f'Exception: {str(e)}')
+        return jsonify({'error': f'Chunk upload failed: {str(e)}'}), 500
+
+@app.route('/api/upload/progress/<session_id>')
+def get_upload_progress(session_id):
+    """Get upload progress for a session"""
+    if not ULTRA_UPLOAD_AVAILABLE:
+        return jsonify({'error': 'Ultra upload system not available'}), 503
+    
+    try:
+        progress = upload_manager.get_upload_progress(session_id)
+        
+        if 'error' in progress:
+            return jsonify(progress), 404
+        
+        return jsonify(progress), 200
+        
+    except Exception as e:
+        return jsonify({'error': f'Progress retrieval failed: {str(e)}'}), 500
+
+@app.route('/api/upload/assemble', methods=['POST'])
+def assemble_file():
+    """Assemble uploaded chunks into final file"""
+    if not ULTRA_UPLOAD_AVAILABLE:
+        return jsonify({'error': 'Ultra upload system not available'}), 503
+    
+    try:
+        data = request.get_json()
+        if not data or 'session_id' not in data:
+            return jsonify({'error': 'Missing session ID'}), 400
+        
+        session_id = data['session_id']
+        
+        # Get session info
+        progress = upload_manager.get_upload_progress(session_id)
+        if 'error' in progress:
+            return jsonify({'error': 'Session not found'}), 404
+        
+        # Determine output path
+        filename = progress['filename']
+        secure_filename_safe = secure_filename(filename)
+        
+        # Handle duplicate filenames
+        counter = 1
+        original_filename = secure_filename_safe
+        while os.path.exists(os.path.join(UPLOAD_FOLDER, secure_filename_safe)):
+            name, ext = os.path.splitext(original_filename)
+            secure_filename_safe = f"{name}_{counter}{ext}"
+            counter += 1
+        
+        output_path = os.path.join(UPLOAD_FOLDER, secure_filename_safe)
+        
+        # Assemble file
+        result = upload_manager.assemble_file(session_id, output_path)
+        
+        if 'error' in result:
+            log_security_event('FILE_ASSEMBLY_ERROR', f'Session: {session_id}, Error: {result["error"]}')
+            return jsonify(result), 500
+        
+        # Save metadata
+        metadata = {
+            'original_name': filename,
+            'size': result['final_size'],
+            'upload_time': datetime.now().isoformat(),
+            'session_id': session_id,
+            'is_locked': False,
+            'password_hash': None,
+            'storage_type': 'local',
+            'cloud_file_id': None,
+            'upload_method': 'ultra_chunked'
+        }
+        save_file_metadata(secure_filename_safe, metadata)
+        
+        # Clean up session
+        upload_manager.cleanup_session(session_id)
+        
+        log_security_event('FILE_ASSEMBLY_SUCCESS', f'{filename} ({get_file_size(result["final_size"])})')
+        
+        return jsonify({
+            'status': 'success',
+            'filename': secure_filename_safe,
+            'original_name': filename,
+            'final_size': result['final_size'],
+            'output_path': output_path
+        }), 200
+        
+    except Exception as e:
+        log_security_event('FILE_ASSEMBLY_ERROR', f'Exception: {str(e)}')
+        return jsonify({'error': f'File assembly failed: {str(e)}'}), 500
+
+@app.route('/api/upload/sessions')
+def list_upload_sessions():
+    """List all active upload sessions"""
+    if not ULTRA_UPLOAD_AVAILABLE:
+        return jsonify({'error': 'Ultra upload system not available'}), 503
+    
+    try:
+        sessions = upload_manager.get_active_sessions()
+        return jsonify({
+            'status': 'success',
+            'sessions': sessions,
+            'total_sessions': len(sessions)
+        }), 200
+        
+    except Exception as e:
+        return jsonify({'error': f'Session listing failed: {str(e)}'}), 500
+
+@app.route('/ultra-upload')
+def ultra_upload_page():
+    """Serve the ultra-high-speed upload interface"""
+    try:
+        with open('ultra_upload_frontend.html', 'r') as f:
+            html_content = f.read()
+        return html_content
+    except FileNotFoundError:
+        return jsonify({'error': 'Ultra upload interface not found'}), 404
 
 @app.route('/health')
 def health_check():
