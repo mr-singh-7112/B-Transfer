@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-WSGI entry point for B-Transfer
-This file allows Gunicorn to properly import the Flask app
+Fallback app.py for Render deployment
+This file redirects to our main application
 """
 
 import os
@@ -19,5 +19,5 @@ except ImportError as e:
     print(f"Python path: {sys.path}")
     sys.exit(1)
 
-if __name__ == "__main__":
-    app.run() 
+# This is what Render expects by default
+application = app 
