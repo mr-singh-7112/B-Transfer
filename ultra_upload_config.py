@@ -99,7 +99,7 @@ class UltraUploadConfig:
         # File types that compress well
         high_compression_types = {'.txt', '.log', '.csv', '.json', '.xml', '.html', '.css', '.js'}
         # File types that don't compress well
-        low_compression_types = {'.jpg', '.jpeg', '.png', '.gif', '.mp4', '.avi', '.mov', '.mp3', '.wav', '.zip', '.rar', '.7z'}
+        low_compression_types = {'.jpg', '.jpeg', '.png', '.gif', '.heic', '.heif', '.mp4', '.avi', '.mov', '.mp3', '.wav', '.zip', '.rar', '.7z'}
         
         file_ext = os.path.splitext(file_type)[1].lower()
         

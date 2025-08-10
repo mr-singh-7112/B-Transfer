@@ -46,7 +46,7 @@ MAX_UPLOADS_PER_SESSION = 100  # Increased from 50
 MAX_FILE_SIZE_PER_UPLOAD = 5 * 1024 * 1024 * 1024  # 5GB
 CLOUD_STORAGE_THRESHOLD = 100 * 1024 * 1024  # 100MB - use cloud for files > 100MB
 ALLOWED_EXTENSIONS = {
-    'txt', 'pdf', 'png', 'jpg', 'jpeg', 'gif', 'mp4', 'avi', 'mov', 'mp3', 'wav',
+    'txt', 'pdf', 'png', 'jpg', 'jpeg', 'gif', 'heic', 'heif', 'mp4', 'avi', 'mov', 'mp3', 'wav',
     'zip', 'rar', '7z', 'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx', 'csv'
 }
 
