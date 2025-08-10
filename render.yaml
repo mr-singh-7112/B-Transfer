@@ -4,7 +4,7 @@ services:
     env: python
     plan: starter
     buildCommand: pip install -r requirements.txt
-    startCommand: gunicorn --bind 0.0.0.0:$PORT --workers 4 --worker-class eventlet --timeout 300 --keep-alive 5 b_transfer_server:app
+    startCommand: gunicorn --bind 0.0.0.0:$PORT --workers 4 --timeout 300 --keep-alive 5 b_transfer_server:app
     envVars:
       - key: PYTHON_VERSION
         value: 3.11.0
