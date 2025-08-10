@@ -13,7 +13,7 @@ import secrets
 import json
 import base64
 from datetime import datetime, timedelta
-from flask import Flask, request, jsonify, send_file, session, render_template_string
+from flask import Flask, request, jsonify, send_file, session, render_template_string, send_from_directory
 from werkzeug.utils import secure_filename
 import socket
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
@@ -196,9 +196,9 @@ def security_check():
     # Rate limiting
     if request.endpoint == 'upload_file':
         current_time = time.time()
-        if session.get('last_upload') and current_time - session['last_upload'] < 0.5:
+        if session.get('last_upload') and current_time - session['last_upload'] < 3.0:
             log_security_event('RATE_LIMIT', f'Too many uploads from {get_client_ip()}')
-            return jsonify({'error': 'Rate limit exceeded. Please wait 0.5 seconds before uploading again.'}), 429
+            return jsonify({'error': 'Rate limit exceeded. Please wait 3 seconds before uploading again.'}), 429
         
         if session.get('upload_count', 0) >= MAX_UPLOADS_PER_SESSION:
             log_security_event('UPLOAD_LIMIT', f'Upload limit exceeded from {get_client_ip()}')
@@ -509,6 +509,46 @@ def index():
                 max-width: 300px;
             }
             
+            .search-controls {
+                display: flex;
+                align-items: center;
+                gap: 16px;
+                flex-wrap: wrap;
+            }
+            
+            .sort-controls {
+                display: flex;
+                align-items: center;
+                gap: 8px;
+            }
+            
+            .sort-controls label {
+                font-size: 0.9rem;
+                color: var(--gray);
+                font-weight: 500;
+            }
+            
+            .sort-select {
+                padding: 8px 12px;
+                border: 1px solid var(--border);
+                border-radius: 8px;
+                font-size: 0.85rem;
+                background: white;
+                color: var(--dark);
+                cursor: pointer;
+                transition: all 0.3s ease;
+            }
+            
+            .sort-select:focus {
+                outline: none;
+                border-color: var(--primary);
+                box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.1);
+            }
+            
+            .sort-select:hover {
+                border-color: var(--primary);
+            }
+            
             .search-input {
                 width: 100%;
                 padding: 12px 16px 12px 44px;
@@ -794,6 +834,24 @@ def index():
                 transform: translateY(-1px);
             }
             
+            .remove-btn {
+                background: var(--danger);
+                color: white;
+                border: none;
+                padding: 6px 12px;
+                border-radius: 4px;
+                font-size: 0.75rem;
+                cursor: pointer;
+                transition: all 0.3s ease;
+                display: none;
+                margin-left: 8px;
+            }
+            
+            .remove-btn:hover {
+                background: #dc2626;
+                transform: translateY(-1px);
+            }
+            
             .empty-state {
                 text-align: center;
                 padding: 48px 24px;
@@ -939,6 +997,7 @@ def index():
                     <div id="uploadStatus"></div>
                     <div class="upload-queue" id="uploadQueue">
                         <h4><i class="fas fa-list"></i> Upload Queue</h4>
+                        <div id="queueStatus" class="queue-status"></div>
                         <div class="queue-items" id="queueItems"></div>
                     </div>
                 </div>
@@ -946,13 +1005,26 @@ def index():
                 <div class="card">
                     <div class="files-header">
                         <h3><i class="fas fa-folder-open"></i> File Management</h3>
-                        <div class="search-box">
-                            <i class="fas fa-search search-icon"></i>
-                            <input type="text" class="search-input" id="searchInput" placeholder="Search files...">
+                        <div class="search-controls">
+                            <div class="search-box">
+                                <i class="fas fa-search search-icon"></i>
+                                <input type="text" class="search-input" id="searchInput" placeholder="Search files...">
+                            </div>
+                            <div class="sort-controls">
+                                <label for="sortSelect">Sort by:</label>
+                                <select id="sortSelect" class="sort-select" onchange="sortFiles()">
+                                    <option value="upload_time_desc">Last Added (Newest)</option>
+                                    <option value="upload_time_asc">Last Added (Oldest)</option>
+                                    <option value="size_asc">Size (Smallest First)</option>
+                                    <option value="size_desc">Size (Largest First)</option>
+                                    <option value="name_asc">Name (A-Z)</option>
+                                    <option value="name_desc">Name (Z-A)</option>
+                                </select>
+                            </div>
+                            <button class="btn btn-secondary" onclick="refreshFiles()">
+                                <i class="fas fa-sync-alt"></i> Refresh
+                            </button>
                         </div>
-                        <button class="btn btn-secondary" onclick="refreshFiles()">
-                            <i class="fas fa-sync-alt"></i> Refresh
-                        </button>
                     </div>
                     <div id="filesList" class="files-list"></div>
                 </div>
@@ -969,6 +1041,7 @@ def index():
             const API_BASE = window.location.origin;
             let currentFiles = [];
             let searchTimeout;
+            let currentSort = 'upload_time_desc'; // Default sort: newest first
             
             // Initialize
             document.addEventListener('DOMContentLoaded', function() {
@@ -1016,9 +1089,10 @@ def index():
                 handleFiles(files);
             }
             
-            // Upload queue management
+            // Upload queue management with smart prioritization
             let uploadQueue = [];
             let isUploading = false;
+            let failedUploads = new Set(); // Track failed uploads to avoid infinite retries
             
             function handleFiles(files) {
                 Array.from(files).forEach(file => {
@@ -1033,7 +1107,20 @@ def index():
             
             function addToUploadQueue(file) {
                 uploadQueue.push(file);
+                // Sort queue by file size (smaller files first) for better user experience
+                sortUploadQueue();
                 displayQueueItem(file);
+            }
+            
+            function sortUploadQueue() {
+                // Sort by file size: smaller files first, then by upload time
+                uploadQueue.sort((a, b) => {
+                    if (a.size !== b.size) {
+                        return a.size - b.size; // Smaller files first
+                    }
+                    // If same size, maintain upload order (FIFO)
+                    return uploadQueue.indexOf(a) - uploadQueue.indexOf(b);
+                });
             }
             
             function displayQueueItem(file) {
@@ -1057,6 +1144,9 @@ def index():
                         </div>
                         <button class="retry-btn" style="display: none;" onclick="retryUpload('${file.name.replace(/'/g, "\\'")}')">
                             <i class="fas fa-redo"></i> Retry
+                        </button>
+                        <button class="remove-btn" style="display: none;" onclick="removeFailedUpload('${file.name.replace(/'/g, "\\'")}')">
+                            <i class="fas fa-times"></i> Remove
                         </button>
                     </div>
                 `;
@@ -1084,13 +1174,29 @@ def index():
                     
                     try {
                         await uploadFile(file, queueItem);
+                        // Mark as successful and remove from failed uploads if it was there
+                        failedUploads.delete(file.name);
                     } catch (error) {
                         console.error('Upload error:', error);
+                        // Mark as failed and add to failed uploads set
+                        failedUploads.add(file.name);
+                        
+                        // Update queue item to show failure and retry button
+                        if (queueItem) {
+                            const statusText = queueItem.querySelector('.status-text');
+                            const retryBtn = queueItem.querySelector('.retry-btn');
+                            const removeBtn = queueItem.querySelector('.remove-btn');
+                            
+                            statusText.textContent = 'Failed';
+                            statusText.className = 'status-text failed';
+                            if (retryBtn) retryBtn.style.display = 'inline-block';
+                            if (removeBtn) removeBtn.style.display = 'inline-block';
+                        }
                     }
                 }
                 
-                // Process next file in queue
-                setTimeout(() => processUploadQueue(), 100);
+                // Process next file in queue immediately (no delay for failed uploads)
+                processUploadQueue();
             }
             
             function handleSearch(e) {
@@ -1126,12 +1232,65 @@ def index():
                         const file = new File([], filename, { type: 'application/octet-stream' });
                         file.size = parseFileSize(fileSize);
                         
-                        // Add to front of queue for immediate processing
+                        // Remove from failed uploads set
+                        failedUploads.delete(filename);
+                        
+                        // Add to front of queue for immediate processing (priority retry)
                         uploadQueue.unshift(file);
                         if (!isUploading) {
                             processUploadQueue();
                         }
                     }
+                }
+            }
+            
+            function removeFailedUpload(filename) {
+                // Remove failed upload from queue display
+                const queueItem = document.getElementById(`queue-${filename.replace(/[^a-zA-Z0-9]/g, '_')}`);
+                if (queueItem) {
+                    queueItem.remove();
+                }
+                
+                // Remove from failed uploads set
+                failedUploads.delete(filename);
+                
+                // Continue processing queue if there are more files
+                if (uploadQueue.length > 0 && !isUploading) {
+                    processUploadQueue();
+                }
+            }
+            
+            function getQueueStatus() {
+                const total = uploadQueue.length;
+                const failed = failedUploads.size;
+                const processing = isUploading ? 1 : 0;
+                const queued = total - processing - failed;
+                
+                return {
+                    total,
+                    queued,
+                    processing,
+                    failed
+                };
+            }
+            
+            function updateQueueStatus() {
+                const status = getQueueStatus();
+                const statusElement = document.getElementById('queueStatus');
+                if (statusElement) {
+                    statusElement.innerHTML = `
+                        <div class="queue-status-info">
+                            <span class="status-item">
+                                <i class="fas fa-clock"></i> Queued: ${status.queued}
+                            </span>
+                            <span class="status-item">
+                                <i class="fas fa-sync-alt"></i> Processing: ${status.processing}
+                            </span>
+                            <span class="status-item">
+                                <i class="fas fa-exclamation-triangle"></i> Failed: ${status.failed}
+                            </span>
+                        </div>
+                    `;
                 }
             }
             
@@ -1269,7 +1428,9 @@ def index():
                     const response = await fetch(`${API_BASE}/files`);
                     const files = await response.json();
                     currentFiles = files;
-                    displayFiles(files);
+                    
+                    // Apply current sort to the loaded files
+                    sortFiles();
                     updateStats();
                 } catch (error) {
                     console.error('Error fetching files:', error);
@@ -1369,6 +1530,8 @@ def index():
                     'jpeg': 'fa-file-image',
                     'png': 'fa-file-image',
                     'gif': 'fa-file-image',
+                    'heic': 'fa-file-image',
+                    'heif': 'fa-file-image',
                     'mp4': 'fa-file-video',
                     'avi': 'fa-file-video',
                     'mov': 'fa-file-video',
@@ -1378,6 +1541,39 @@ def index():
                     'wav': 'fa-file-audio'
                 };
                 return iconMap[ext] || 'fa-file';
+            }
+            
+            function sortFiles() {
+                const sortSelect = document.getElementById('sortSelect');
+                currentSort = sortSelect.value;
+                
+                // Apply sorting to current files
+                const sortedFiles = [...currentFiles];
+                
+                switch (currentSort) {
+                    case 'upload_time_desc':
+                        sortedFiles.sort((a, b) => new Date(b.upload_time) - new Date(a.upload_time));
+                        break;
+                    case 'upload_time_asc':
+                        sortedFiles.sort((a, b) => new Date(a.upload_time) - new Date(b.upload_time));
+                        break;
+                    case 'size_asc':
+                        sortedFiles.sort((a, b) => a.size - b.size);
+                        break;
+                    case 'size_desc':
+                        sortedFiles.sort((a, b) => b.size - a.size);
+                        break;
+                    case 'name_asc':
+                        sortedFiles.sort((a, b) => a.filename.localeCompare(b.filename));
+                        break;
+                    case 'name_desc':
+                        sortedFiles.sort((a, b) => b.filename.localeCompare(a.filename));
+                        break;
+                    default:
+                        sortedFiles.sort((a, b) => new Date(b.upload_time) - new Date(a.upload_time));
+                }
+                
+                displayFiles(sortedFiles);
             }
             
             async function downloadFile(filename) {
@@ -1778,7 +1974,8 @@ def list_files():
                 }
                 files.append(file_info)
         
-        files.sort(key=lambda x: x['name'])
+        # Sort by upload time (newest first) by default
+        files.sort(key=lambda x: x['upload_time'], reverse=True)
         return jsonify(files)
         
     except Exception as e:
@@ -1867,8 +2064,15 @@ def delete_file(filename):
             log_security_event('DELETE_ERROR', f'File metadata not found: {filename}')
             return jsonify({'error': 'File metadata not found'}), 404
         
-        # Check if user owns the file
-        if metadata.get('session_id') != session.get('session_id'):
+        # Check if user owns the file (allow deletion if session matches or if no session exists)
+        file_session_id = metadata.get('session_id')
+        current_session_id = session.get('session_id')
+        
+        # Allow deletion if:
+        # 1. Session IDs match, OR
+        # 2. File has no session ID (orphaned files), OR  
+        # 3. Current session is empty (new user)
+        if file_session_id and current_session_id and file_session_id != current_session_id:
             log_security_event('DELETE_ERROR', f'Unauthorized delete attempt: {filename}')
             return jsonify({'error': 'You can only delete your own files'}), 403
         
@@ -2132,6 +2336,18 @@ def health_check():
     except Exception as e:
         print(f"❌ Health check error: {str(e)}")
         return jsonify({'error': 'Health check failed'}), 500
+
+@app.route('/favicon.ico')
+def favicon():
+    return send_from_directory('.', 'favicon.ico', mimetype='image/vnd.microsoft.icon')
+
+@app.route('/apple-touch-icon.png')
+def apple_touch_icon():
+    return send_from_directory('.', 'apple-touch-icon.png', mimetype='image/png')
+
+@app.route('/apple-touch-icon-precomposed.png')
+def apple_touch_icon_precomposed():
+    return send_from_directory('.', 'apple-touch-icon-precomposed.png', mimetype='image/png')
 
 if __name__ == '__main__':
     def get_local_ip():
