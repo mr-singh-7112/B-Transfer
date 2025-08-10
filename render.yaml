@@ -1,0 +1,12 @@
+services:
+  - type: web
+    name: b-transfer
+    env: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: python3 b_transfer_server.py
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.10.0
+      - key: PORT
+        value: 10000 

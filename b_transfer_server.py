@@ -13,7 +13,7 @@ import secrets
 import json
 import base64
 from datetime import datetime, timedelta
-from flask import Flask, request, jsonify, send_file, render_template_string, session
+from flask import Flask, request, jsonify, send_file, session
 from werkzeug.utils import secure_filename
 import socket
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
@@ -197,7 +197,21 @@ def security_check():
 
 @app.route('/')
 def index():
-    return render_template_string(open('b_transfer_ui.html').read())
+    return jsonify({
+        'service': 'B-Transfer API Server',
+        'version': '2.1.0',
+        'copyright': 'Copyright (c) 2025 Balsim Technologies. All rights reserved.',
+        'endpoints': {
+            'upload': '/upload (POST)',
+            'download': '/download/<filename> (GET)',
+            'files': '/files (GET)',
+            'delete': '/delete/<filename> (DELETE)',
+            'lock': '/lock/<filename> (POST)',
+            'unlock': '/unlock/<filename> (POST)',
+            'health': '/health (GET)'
+        },
+        'message': 'This is an API-only server. Use the endpoints above to interact with the service.'
+    })
 
 @app.route('/upload', methods=['POST'])
 def upload_file():
@@ -608,7 +622,7 @@ if __name__ == '__main__':
     
     port = int(os.environ.get('PORT', 8081))
     
-    # Check if running on Railway
+    # Check if running on cloud platforms
     if os.environ.get('RAILWAY_ENVIRONMENT') == 'production':
         print("🚂 B-Transfer Server Starting on Railway...")
         print("=" * 60)
@@ -625,6 +639,25 @@ if __name__ == '__main__':
         print("")
         
         # Railway production settings
+        app.config['PREFERRED_URL_SCHEME'] = 'https'
+        app.run(host='0.0.0.0', port=port, threaded=True, debug=False)
+        
+    elif os.environ.get('RENDER'):
+        print("☁️ B-Transfer Server Starting on Render...")
+        print("=" * 60)
+        print("Copyright (c) 2025 Balsim Technologies. All rights reserved.")
+        print("Proprietary and confidential software.")
+        print("=" * 60)
+        print("☁️ Cloud deployment with Google Cloud Storage integration")
+        print("🔄 Server supports up to 5GB file transfers")
+        print("🔐 Enhanced security with rate limiting")
+        print("🔒 Military-grade file locking with AES-256")
+        print("🕐 Auto-delete after 24 hours")
+        print("=" * 60)
+        print("Press Ctrl+C to stop the server")
+        print("")
+        
+        # Render production settings
         app.config['PREFERRED_URL_SCHEME'] = 'https'
         app.run(host='0.0.0.0', port=port, threaded=True, debug=False)
         
