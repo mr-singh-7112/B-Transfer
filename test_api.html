@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>B-Transfer API Tester</title>
+    <style>
+        body { font-family: Arial, sans-serif; max-width: 800px; margin: 0 auto; padding: 20px; }
+        .endpoint { background: #f5f5f5; padding: 15px; margin: 10px 0; border-radius: 5px; }
+        button { background: #007bff; color: white; border: none; padding: 10px 20px; border-radius: 5px; cursor: pointer; }
+        button:hover { background: #0056b3; }
+        .result { background: #e9ecef; padding: 10px; margin: 10px 0; border-radius: 5px; white-space: pre-wrap; }
+        input[type="file"] { margin: 10px 0; }
+        .status { padding: 5px 10px; border-radius: 3px; margin-left: 10px; }
+        .success { background: #d4edda; color: #155724; }
+        .error { background: #f8d7da; color: #721c24; }
+    </style>
+</head>
+<body>
+    <h1>🚀 B-Transfer API Tester</h1>
+    <p>Test your deployed API at: <strong>https://b-transfer-2.onrender.com</strong></p>
+    
+    <div class="endpoint">
+        <h3>🏥 Health Check</h3>
+        <button onclick="checkHealth()">Check Server Health</button>
+        <button onclick="testDirect()" style="background: #28a745; margin-left: 10px;">Test Direct (Bypass CORS)</button>
+        <div id="healthResult" class="result"></div>
+    </div>
+
+    <div class="endpoint">
+        <h3>📁 List Files</h3>
+        <button onclick="listFiles()">List All Files</button>
+        <div id="filesResult" class="result"></div>
+    </div>
+
+    <div class="endpoint">
+        <h3>📤 Upload File</h3>
+        <input type="file" id="fileInput" accept="*/*">
+        <button onclick="uploadFile()">Upload File</button>
+        <div id="uploadResult" class="result"></div>
+    </div>
+
+    <div class="endpoint">
+        <h3>🔒 Lock File</h3>
+        <input type="text" id="lockFilename" placeholder="Enter filename to lock">
+        <button onclick="lockFile()">Lock File</button>
+        <div id="lockResult" class="result"></div>
+    </div>
+
+    <div class="endpoint">
+        <h3>🔓 Unlock File</h3>
+        <input type="text" id="unlockFilename" placeholder="Enter filename to unlock">
+        <button onclick="unlockFile()">Unlock File</button>
+        <div id="unlockResult" class="result"></div>
+    </div>
+
+    <script>
+        const API_BASE = 'https://b-transfer-2.onrender.com';
+
+        async function checkHealth() {
+            try {
+                const response = await fetch(`${API_BASE}/health`, {
+                    method: 'GET',
+                    mode: 'cors',
+                    headers: {
+                        'Accept': 'application/json'
+                    }
+                });
+                const data = await response.json();
+                document.getElementById('healthResult').innerHTML = JSON.stringify(data, null, 2);
+            } catch (error) {
+                document.getElementById('healthResult').innerHTML = `Error: ${error.message}\n\nTry opening the browser console (F12) for more details.`;
+                console.error('Health check error:', error);
+            }
+        }
+
+        async function listFiles() {
+            try {
+                const response = await fetch(`${API_BASE}/files`);
+                const data = await response.json();
+                document.getElementById('filesResult').innerHTML = JSON.stringify(data, null, 2);
+            } catch (error) {
+                document.getElementById('filesResult').innerHTML = `Error: ${error.message}`;
+            }
+        }
+
+        async function uploadFile() {
+            const fileInput = document.getElementById('fileInput');
+            const file = fileInput.files[0];
+            
+            if (!file) {
+                alert('Please select a file first!');
+                return;
+            }
+
+            const formData = new FormData();
+            formData.append('file', file);
+
+            try {
+                const response = await fetch(`${API_BASE}/upload`, {
+                    method: 'POST',
+                    body: formData
+                });
+                const data = await response.json();
+                document.getElementById('uploadResult').innerHTML = JSON.stringify(data, null, 2);
+            } catch (error) {
+                document.getElementById('uploadResult').innerHTML = `Error: ${error.message}`;
+            }
+        }
+
+        async function lockFile() {
+            const filename = document.getElementById('lockFilename').value;
+            if (!filename) {
+                alert('Please enter a filename!');
+                return;
+            }
+
+            try {
+                const response = await fetch(`${API_BASE}/lock/${filename}`, {
+                    method: 'POST'
+                });
+                const data = await response.json();
+                document.getElementById('lockResult').innerHTML = JSON.stringify(data, null, 2);
+            } catch (error) {
+                document.getElementById('lockResult').innerHTML = `Error: ${error.message}`;
+            }
+        }
+
+        async function unlockFile() {
+            const filename = document.getElementById('unlockFilename').value;
+            if (!filename) {
+                alert('Please enter a filename!');
+                return;
+            }
+
+            try {
+                const response = await fetch(`${API_BASE}/unlock/${filename}`, {
+                    method: 'POST'
+                });
+                const data = await response.json();
+                document.getElementById('unlockResult').innerHTML = JSON.stringify(data, null, 2);
+            } catch (error) {
+                document.getElementById('unlockResult').innerHTML = `Error: ${error.message}`;
+            }
+        }
+
+        async function testDirect() {
+            // This will open the API directly in a new tab
+            window.open(`${API_BASE}/health`, '_blank');
+        }
+
+        // Auto-check health when page loads
+        window.onload = function() {
+            checkHealth();
+        };
+    </script>
+</body>
+</html> 

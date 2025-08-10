@@ -13,7 +13,7 @@ import secrets
 import json
 import base64
 from datetime import datetime, timedelta
-from flask import Flask, request, jsonify, send_file, session
+from flask import Flask, request, jsonify, send_file, session, render_template_string
 from werkzeug.utils import secure_filename
 import socket
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
@@ -197,21 +197,487 @@ def security_check():
 
 @app.route('/')
 def index():
-    return jsonify({
-        'service': 'B-Transfer API Server',
-        'version': '2.1.0',
-        'copyright': 'Copyright (c) 2025 Balsim Technologies. All rights reserved.',
-        'endpoints': {
-            'upload': '/upload (POST)',
-            'download': '/download/<filename> (GET)',
-            'files': '/files (GET)',
-            'delete': '/delete/<filename> (DELETE)',
-            'lock': '/lock/<filename> (POST)',
-            'unlock': '/unlock/<filename> (POST)',
-            'health': '/health (GET)'
-        },
-        'message': 'This is an API-only server. Use the endpoints above to interact with the service.'
-    })
+    html_template = '''
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>B-Transfer - Secure File Transfer</title>
+        <style>
+            * {
+                margin: 0;
+                padding: 0;
+                box-sizing: border-box;
+            }
+            
+            body {
+                font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                min-height: 100vh;
+                color: #333;
+            }
+            
+            .container {
+                max-width: 1200px;
+                margin: 0 auto;
+                padding: 20px;
+            }
+            
+            .header {
+                text-align: center;
+                margin-bottom: 40px;
+                color: white;
+            }
+            
+            .header h1 {
+                font-size: 3rem;
+                margin-bottom: 10px;
+                text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+            }
+            
+            .header p {
+                font-size: 1.2rem;
+                opacity: 0.9;
+            }
+            
+            .main-content {
+                display: grid;
+                grid-template-columns: 1fr 1fr;
+                gap: 30px;
+                margin-bottom: 40px;
+            }
+            
+            .card {
+                background: white;
+                border-radius: 15px;
+                padding: 30px;
+                box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+                transition: transform 0.3s ease;
+            }
+            
+            .card:hover {
+                transform: translateY(-5px);
+            }
+            
+            .card h3 {
+                color: #667eea;
+                margin-bottom: 20px;
+                font-size: 1.5rem;
+                border-bottom: 2px solid #667eea;
+                padding-bottom: 10px;
+            }
+            
+            .upload-area {
+                border: 3px dashed #667eea;
+                border-radius: 10px;
+                padding: 40px;
+                text-align: center;
+                margin-bottom: 20px;
+                transition: all 0.3s ease;
+                cursor: pointer;
+            }
+            
+            .upload-area:hover {
+                border-color: #764ba2;
+                background: #f8f9ff;
+            }
+            
+            .upload-area.dragover {
+                border-color: #764ba2;
+                background: #f0f2ff;
+                transform: scale(1.02);
+            }
+            
+            .file-input {
+                display: none;
+            }
+            
+            .upload-btn {
+                background: linear-gradient(45deg, #667eea, #764ba2);
+                color: white;
+                border: none;
+                padding: 15px 30px;
+                border-radius: 25px;
+                font-size: 1.1rem;
+                cursor: pointer;
+                transition: all 0.3s ease;
+                margin: 10px;
+            }
+            
+            .upload-btn:hover {
+                transform: translateY(-2px);
+                box-shadow: 0 5px 15px rgba(0,0,0,0.2);
+            }
+            
+            .files-list {
+                max-height: 400px;
+                overflow-y: auto;
+            }
+            
+            .file-item {
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                padding: 15px;
+                border: 1px solid #e0e0e0;
+                border-radius: 8px;
+                margin-bottom: 10px;
+                background: #f8f9fa;
+                transition: all 0.3s ease;
+            }
+            
+            .file-item:hover {
+                background: #e9ecef;
+                border-color: #667eea;
+            }
+            
+            .file-info {
+                flex: 1;
+            }
+            
+            .file-name {
+                font-weight: bold;
+                color: #333;
+                margin-bottom: 5px;
+            }
+            
+            .file-meta {
+                font-size: 0.9rem;
+                color: #666;
+            }
+            
+            .file-actions {
+                display: flex;
+                gap: 10px;
+            }
+            
+            .action-btn {
+                padding: 8px 15px;
+                border: none;
+                border-radius: 5px;
+                cursor: pointer;
+                font-size: 0.9rem;
+                transition: all 0.3s ease;
+            }
+            
+            .download-btn {
+                background: #28a745;
+                color: white;
+            }
+            
+            .download-btn:hover {
+                background: #218838;
+            }
+            
+            .lock-btn {
+                background: #ffc107;
+                color: #212529;
+            }
+            
+            .lock-btn:hover {
+                background: #e0a800;
+            }
+            
+            .unlock-btn {
+                background: #17a2b8;
+                color: white;
+            }
+            
+            .unlock-btn:hover {
+                background: #138496;
+            }
+            
+            .delete-btn {
+                background: #dc3545;
+                color: white;
+            }
+            
+            .delete-btn:hover {
+                background: #c82333;
+            }
+            
+            .status {
+                padding: 10px;
+                border-radius: 5px;
+                margin: 10px 0;
+                text-align: center;
+            }
+            
+            .status.success {
+                background: #d4edda;
+                color: #155724;
+                border: 1px solid #c3e6cb;
+            }
+            
+            .status.error {
+                background: #f8d7da;
+                color: #721c24;
+                border: 1px solid #f5c6cb;
+            }
+            
+            .progress-bar {
+                width: 100%;
+                height: 20px;
+                background: #e9ecef;
+                border-radius: 10px;
+                overflow: hidden;
+                margin: 10px 0;
+            }
+            
+            .progress-fill {
+                height: 100%;
+                background: linear-gradient(45deg, #667eea, #764ba2);
+                width: 0%;
+                transition: width 0.3s ease;
+            }
+            
+            .footer {
+                text-align: center;
+                color: white;
+                margin-top: 40px;
+                opacity: 0.8;
+            }
+            
+            @media (max-width: 768px) {
+                .main-content {
+                    grid-template-columns: 1fr;
+                }
+                
+                .header h1 {
+                    font-size: 2rem;
+                }
+                
+                .container {
+                    padding: 10px;
+                }
+            }
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <div class="header">
+                <h1>🚀 B-Transfer</h1>
+                <p>Secure File Transfer with Military-Grade Encryption</p>
+            </div>
+            
+            <div class="main-content">
+                <div class="card">
+                    <h3>📤 Upload Files</h3>
+                    <div class="upload-area" id="uploadArea">
+                        <p>📁 Drag & drop files here or click to browse</p>
+                        <input type="file" id="fileInput" class="file-input" multiple>
+                        <button class="upload-btn" onclick="document.getElementById('fileInput').click()">
+                            Choose Files
+                        </button>
+                    </div>
+                    <div id="uploadStatus"></div>
+                    <div class="progress-bar" id="progressBar" style="display: none;">
+                        <div class="progress-fill" id="progressFill"></div>
+                    </div>
+                </div>
+                
+                <div class="card">
+                    <h3>📋 File Management</h3>
+                    <button class="upload-btn" onclick="refreshFiles()">🔄 Refresh Files</button>
+                    <div id="filesList" class="files-list"></div>
+                </div>
+            </div>
+            
+            <div class="footer">
+                <p>© 2025 Balsim Technologies. All rights reserved.</p>
+                <p>Proprietary and confidential software.</p>
+            </div>
+        </div>
+
+        <script>
+            const API_BASE = window.location.origin;
+            let currentFiles = [];
+            
+            // Drag and drop functionality
+            const uploadArea = document.getElementById('uploadArea');
+            const fileInput = document.getElementById('fileInput');
+            
+            uploadArea.addEventListener('dragover', (e) => {
+                e.preventDefault();
+                uploadArea.classList.add('dragover');
+            });
+            
+            uploadArea.addEventListener('dragleave', () => {
+                uploadArea.classList.remove('dragover');
+            });
+            
+            uploadArea.addEventListener('drop', (e) => {
+                e.preventDefault();
+                uploadArea.classList.remove('dragover');
+                const files = e.dataTransfer.files;
+                handleFiles(files);
+            });
+            
+            fileInput.addEventListener('change', (e) => {
+                handleFiles(e.target.files);
+            });
+            
+            function handleFiles(files) {
+                Array.from(files).forEach(file => {
+                    uploadFile(file);
+                });
+            }
+            
+            async function uploadFile(file) {
+                const formData = new FormData();
+                formData.append('file', file);
+                
+                const statusDiv = document.getElementById('uploadStatus');
+                statusDiv.innerHTML = `<div class="status">📤 Uploading ${file.name}...</div>`;
+                
+                const progressBar = document.getElementById('progressBar');
+                const progressFill = document.getElementById('progressFill');
+                progressBar.style.display = 'block';
+                
+                try {
+                    const response = await fetch(`${API_BASE}/upload`, {
+                        method: 'POST',
+                        body: formData
+                    });
+                    
+                    const result = await response.json();
+                    
+                    if (response.ok) {
+                        statusDiv.innerHTML = `<div class="status success">✅ ${file.name} uploaded successfully!</div>`;
+                        refreshFiles();
+                    } else {
+                        statusDiv.innerHTML = `<div class="status error">❌ Error: ${result.error}</div>`;
+                    }
+                } catch (error) {
+                    statusDiv.innerHTML = `<div class="status error">❌ Upload failed: ${error.message}</div>`;
+                }
+                
+                progressBar.style.display = 'none';
+                setTimeout(() => {
+                    statusDiv.innerHTML = '';
+                }, 5000);
+            }
+            
+            async function refreshFiles() {
+                try {
+                    const response = await fetch(`${API_BASE}/files`);
+                    const files = await response.json();
+                    currentFiles = files;
+                    displayFiles(files);
+                } catch (error) {
+                    console.error('Error fetching files:', error);
+                }
+            }
+            
+            function displayFiles(files) {
+                const filesList = document.getElementById('filesList');
+                
+                if (files.length === 0) {
+                    filesList.innerHTML = '<p style="text-align: center; color: #666;">No files uploaded yet.</p>';
+                    return;
+                }
+                
+                filesList.innerHTML = files.map(file => `
+                    <div class="file-item">
+                        <div class="file-info">
+                            <div class="file-name">${file.filename}</div>
+                            <div class="file-meta">
+                                📏 ${formatFileSize(file.size)} | 
+                                📅 ${new Date(file.upload_time).toLocaleString()} |
+                                ${file.is_locked ? '🔒 Locked' : '🔓 Unlocked'}
+                            </div>
+                        </div>
+                        <div class="file-actions">
+                            <button class="action-btn download-btn" onclick="downloadFile('${file.filename}')">
+                                📥 Download
+                            </button>
+                            ${file.is_locked ? 
+                                `<button class="action-btn unlock-btn" onclick="unlockFile('${file.filename}')">🔓 Unlock</button>` :
+                                `<button class="action-btn lock-btn" onclick="lockFile('${file.filename}')">🔒 Lock</button>`
+                            }
+                            <button class="action-btn delete-btn" onclick="deleteFile('${file.filename}')">
+                                🗑️ Delete
+                            </button>
+                        </div>
+                    </div>
+                `).join('');
+            }
+            
+            async function downloadFile(filename) {
+                try {
+                    window.open(`${API_BASE}/download/${filename}`, '_blank');
+                } catch (error) {
+                    console.error('Download error:', error);
+                }
+            }
+            
+            async function lockFile(filename) {
+                try {
+                    const response = await fetch(`${API_BASE}/lock/${filename}`, {
+                        method: 'POST'
+                    });
+                    
+                    if (response.ok) {
+                        refreshFiles();
+                    }
+                } catch (error) {
+                    console.error('Lock error:', error);
+                }
+            }
+            
+            async function unlockFile(filename) {
+                try {
+                    const response = await fetch(`${API_BASE}/unlock/${filename}`, {
+                        method: 'POST'
+                    });
+                    
+                    if (response.ok) {
+                        refreshFiles();
+                    }
+                } catch (error) {
+                    console.error('Unlock error:', error);
+                }
+            }
+            
+            async function deleteFile(filename) {
+                if (!confirm(`Are you sure you want to delete ${filename}?`)) {
+                    return;
+                }
+                
+                try {
+                    const response = await fetch(`${API_BASE}/delete/${filename}`, {
+                        method: 'DELETE'
+                    });
+                    
+                    if (response.ok) {
+                        refreshFiles();
+                    }
+                } catch (error) {
+                    console.error('Delete error:', error);
+                }
+            }
+            
+            function formatFileSize(bytes) {
+                if (bytes === 0) return '0 Bytes';
+                const k = 1024;
+                const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+                const i = Math.floor(Math.log(bytes) / Math.log(k));
+                return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+            }
+            
+            // Auto-refresh files every 30 seconds
+            setInterval(refreshFiles, 30000);
+            
+            // Load files on page load
+            window.onload = function() {
+                refreshFiles();
+            };
+        </script>
+    </body>
+    </html>
+    '''
+    return html_template
 
 @app.route('/upload', methods=['POST'])
 def upload_file():

@@ -1,1 +1,1 @@
-web: gunicorn --bind 0.0.0.0:$PORT --log-level debug app:app 
+web: gunicorn --bind 0.0.0.0:$PORT b_transfer_server:app 

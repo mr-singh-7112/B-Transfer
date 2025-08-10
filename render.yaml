@@ -4,7 +4,7 @@ services:
     env: python
     plan: free
     buildCommand: pip install -r requirements.txt
-    startCommand: gunicorn --bind 0.0.0.0:$PORT --log-level debug app:app
+    startCommand: gunicorn --bind 0.0.0.0:$PORT b_transfer_server:app
     envVars:
       - key: PYTHON_VERSION
         value: 3.10.0
