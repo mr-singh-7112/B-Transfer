@@ -7,7 +7,7 @@ services:
     startCommand: gunicorn --bind 0.0.0.0:$PORT --workers 4 --worker-class gevent --timeout 300 --keep-alive 5 b_transfer_server:app
     envVars:
       - key: PYTHON_VERSION
-        value: 3.10.0
+        value: 3.11.0
       - key: PORT
         value: 10000
       - key: RENDER
